@@ -180,7 +180,7 @@ class Queue():
         elif self.mode == 'egocentric':
             # Egocentric - Different rewards for each of the agents, based on how much time they spent there
             egocentric_total_reward = self.set_agents_egocentric_reward(ids_agents_ready_for_action)
-            total_reward = egocentric_total_reward
+            total_reward += egocentric_total_reward
         else:
             print('Wrong mode. Choose between collectivism and egocentric')
 
@@ -194,7 +194,7 @@ class Queue():
         if optimize:
             self.multi_agents_SARSA_step(agents_for_optimization)
 
-        return total_reward
+        return agents_for_optimization
     ##########################
     # Simulation aux functions
     ##########################
@@ -275,7 +275,7 @@ class Queue():
             # Check if there is space at away
             if self.away_max_size > len(self.agents):
                 # Check if there is at least one space free overall
-                if (self.away_max_size+self.num_sinks-2)>len(self.agents):
+                if (self.away_max_size+self.num_sinks-1)>len(self.agents):
                     self.add_new_agent('soap', 'away', 0)
                     self.growth_counter = 0
         return
@@ -340,12 +340,17 @@ class Queue():
                 self.single_SARSA_step(agent.last_state, agent.last_action, agent.reward, agent.state, agent.action, agent.state_idx, agent.last_state_idx)
         return
     def single_SARSA_step(self, last_state, last_action, reward, state, action, state_idx, last_state_idx):
+        # Q_S_prime_A_prime = self.get_q_value(state, action)
+        # Q_S_A_idx = self.get_q_value_index(last_state, last_action)
+        # self.q_table.iat[Q_S_A_idx, -1] = self.q_table.iat[Q_S_A_idx, -1] + self.sarsa_alpha*(reward + self.sarsa_gamma*Q_S_prime_A_prime - self.q_table.iat[Q_S_A_idx, -1])
         Q_S_prime_A_prime = self.q_table.iat[state_idx, -1]
         Q_S_A_idx = last_state_idx
         self.q_table.iat[Q_S_A_idx, -1] = self.q_table.iat[Q_S_A_idx, -1] + self.sarsa_alpha*(reward + self.sarsa_gamma*Q_S_prime_A_prime - self.q_table.iat[Q_S_A_idx, -1])
         return
     def single_SARSA_terminal_step(self, last_state, last_action, state_idx, last_state_idx):
         Q_S_prime_A_prime = self.egocentric_terminal_reward
+        # Q_S_A_idx = self.get_q_value_index(last_state, last_action)
+        # self.q_table.iat[Q_S_A_idx, -1] = self.q_table.iat[Q_S_A_idx, -1] + self.sarsa_alpha*(Q_S_prime_A_prime - self.q_table.iat[Q_S_A_idx, -1])
         Q_S_A_idx = last_state_idx
         self.q_table.iat[Q_S_A_idx, -1] = self.q_table.iat[Q_S_A_idx, -1] + self.sarsa_alpha*(Q_S_prime_A_prime - self.q_table.iat[Q_S_A_idx, -1])
         return
@@ -368,6 +373,12 @@ class Queue():
         q_table_dataframe = q_table_dataframe.astype('category') 
         q_table_dataframe['Q'] = q_table_dataframe['Q'].astype(float)
         return q_table_dataframe
+    def get_q_value_index(self, state, action):
+        index = self.q_table.loc[(self.q_table['POS'] == state[0]) & (self.q_table['NEEDS']==state[1]) & (self.q_table['SINKS']==state[2]) & (self.q_table['QUEUE']==state[3]) & (self.q_table['ACTION']==action)].index.item()
+        return index
+    def get_q_value(self, state, action):
+        q_value = self.q_table.loc[(self.q_table['POS'] == state[0]) & (self.q_table['NEEDS']== state[1]) & (self.q_table['SINKS']==state[2]) & (self.q_table['QUEUE']==state[3]) & (self.q_table['ACTION']==action), 'Q'].item()
+        return q_value
     #################
     # Get sink available utilities
     #################
@@ -396,8 +407,7 @@ class Queue():
     # Get if away is full
     ################
     def is_away_full(self):
-        num_agents_in_away = np.sum(np.array([agent.position for agent in self.agents])=='away')
-        return num_agents_in_away == self.away_max_size
+        return len(self.agents) == self.away_max_size
     
     def is_away_with_space_left(self):
         return len(self.agents) < self.away_max_size
@@ -500,6 +510,9 @@ class Queue_agent():
         q_s = []
         for valid_action in valid_actions:
             state = self.get_agent_state(queue.sinks_availability, queue.get_occupation())
+
+            # q_s.append(self.get_q_value(state, valid_action, q_table))
+            
             state_idx = self.get_q_value_index(state, valid_action, q_table)
             states_idxs.append(state_idx)
             q_s.append(q_table.iat[state_idx, -1])
@@ -512,6 +525,9 @@ class Queue_agent():
 
         action = str(action)
         return action
+    def get_q_value(self, state, action, q_table):
+        q_value = q_table.loc[(q_table['POS'] == state[0]) & (q_table['NEEDS']== state[1]) & (q_table['SINKS']==state[2]) & (q_table['QUEUE']==state[3]) & (q_table['ACTION']==action), 'Q'].item()
+        return q_value
     def get_q_value_index(self, state, action, q_table):
         index = q_table.loc[(q_table['POS'] == state[0]) & (q_table['NEEDS']==state[1]) & (q_table['SINKS']==state[2]) & (q_table['QUEUE']==state[3]) & (q_table['ACTION']==action)].index.item()
         return index

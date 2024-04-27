@@ -15,7 +15,6 @@ class Queue():
                   collectivism_param_decay = 0.05, collectivism_param_mult = 20, 
                   egocentric_penalty = -1, egocentric_terminal_reward = 20,
                   sarsa_alpha=0.1, sarsa_gamma=0.1,
-                  policy='',
                   policy_epsilon = 0.5, # The lower, the greeder
                   q_table = None):
         # Inputs:
@@ -57,7 +56,6 @@ class Queue():
         self.sarsa_alpha = sarsa_alpha
         self.sarsa_gamma = sarsa_gamma
         self.policy_epsilon = policy_epsilon
-        self.policy = policy
         # Create or load q_table
         if q_table==None:
             self.q_table = self.get_new_q_table()
@@ -145,7 +143,7 @@ class Queue():
             # Att state in case the last agent have moved. If not, this line should do nothing
             self.att_agents_state([id])
 
-            action = self.agents[id].choose_action(self,self.q_table,self.policy_epsilon,self.policy)
+            action = self.agents[id].choose_action(self,self.q_table,self.policy_epsilon)
             # print('action:',action)
             # (S1,A1,R1,S2,) -> (S1,A1,R1,S2,A2)
             self.take_action(action, id)
@@ -180,7 +178,7 @@ class Queue():
         elif self.mode == 'egocentric':
             # Egocentric - Different rewards for each of the agents, based on how much time they spent there
             egocentric_total_reward = self.set_agents_egocentric_reward(ids_agents_ready_for_action)
-            total_reward = egocentric_total_reward
+            total_reward += egocentric_total_reward
         else:
             print('Wrong mode. Choose between collectivism and egocentric')
 
@@ -275,7 +273,7 @@ class Queue():
             # Check if there is space at away
             if self.away_max_size > len(self.agents):
                 # Check if there is at least one space free overall
-                if (self.away_max_size+self.num_sinks-2)>len(self.agents):
+                if (self.away_max_size+self.num_sinks-1)>len(self.agents):
                     self.add_new_agent('soap', 'away', 0)
                     self.growth_counter = 0
         return
@@ -293,7 +291,6 @@ class Queue():
     def att_agents_last_state(self, ids):
         for id in ids:
             self.agents[id].last_state = self.agents[id].state
-            self.agents[id].last_state_idx = self.agents[id].state_idx
     def att_agents_last_action(self, ids):
         for id in ids:
             self.agents[id].last_action = self.agents[id].action
@@ -334,19 +331,19 @@ class Queue():
         for agent in agents:
             # Check if the agent is at the terminal state
             if (agent.state == 'done'):
-                self.single_SARSA_terminal_step(agent.last_state, agent.last_action, agent.state_idx, agent.last_state_idx)
+                self.single_SARSA_terminal_step(agent.last_state, agent.last_action)
             # Check if the agent have taken at least one action
             elif not(None in [agent.last_state, agent.last_action, agent.reward, agent.state, agent.action]):
-                self.single_SARSA_step(agent.last_state, agent.last_action, agent.reward, agent.state, agent.action, agent.state_idx, agent.last_state_idx)
+                self.single_SARSA_step(agent.last_state, agent.last_action, agent.reward, agent.state, agent.action)
         return
-    def single_SARSA_step(self, last_state, last_action, reward, state, action, state_idx, last_state_idx):
-        Q_S_prime_A_prime = self.q_table.iat[state_idx, -1]
-        Q_S_A_idx = last_state_idx
+    def single_SARSA_step(self, last_state, last_action, reward, state, action):
+        Q_S_prime_A_prime = self.get_q_value(state, action)
+        Q_S_A_idx = self.get_q_value_index(last_state, last_action)
         self.q_table.iat[Q_S_A_idx, -1] = self.q_table.iat[Q_S_A_idx, -1] + self.sarsa_alpha*(reward + self.sarsa_gamma*Q_S_prime_A_prime - self.q_table.iat[Q_S_A_idx, -1])
         return
-    def single_SARSA_terminal_step(self, last_state, last_action, state_idx, last_state_idx):
+    def single_SARSA_terminal_step(self, last_state, last_action):
         Q_S_prime_A_prime = self.egocentric_terminal_reward
-        Q_S_A_idx = last_state_idx
+        Q_S_A_idx = self.get_q_value_index(last_state, last_action)
         self.q_table.iat[Q_S_A_idx, -1] = self.q_table.iat[Q_S_A_idx, -1] + self.sarsa_alpha*(Q_S_prime_A_prime - self.q_table.iat[Q_S_A_idx, -1])
         return
     #################
@@ -365,9 +362,28 @@ class Queue():
         state_combinations = np.array(np.meshgrid(POS, NEEDS, SINKS,QUEUE,ACTIONS)).T.reshape(-1,5)
         q_table_dataframe = pd.DataFrame(columns=['POS','NEEDS','SINKS','QUEUE','ACTION'], data=state_combinations)
         q_table_dataframe['Q'] = 0.0
-        q_table_dataframe = q_table_dataframe.astype('category') 
-        q_table_dataframe['Q'] = q_table_dataframe['Q'].astype(float)
         return q_table_dataframe
+    def get_q_value_index(self, state, action):
+        POS = state[0]
+        NEED = state[1]
+        SINKS = state[2]
+        QUEUE = state[3]
+        ACTION = action
+        index = self.q_table.loc[(self.q_table['POS'] == POS) & (self.q_table['NEEDS']==NEED) & (self.q_table['SINKS']==SINKS) & (self.q_table['QUEUE']==QUEUE) & (self.q_table['ACTION']==ACTION)].index.values
+        if len(index)!=1:
+            print(f'Indexing error! State and action not found on Q table. State:{state}, Action:{action}')
+            print(np.sum(self.q_table['POS'] == POS))
+            print(np.sum(self.q_table['NEEDS']==NEED))
+            print(np.sum(self.q_table['SINKS']==SINKS))
+            print(np.sum(self.q_table['QUEUE']==QUEUE))
+            print(np.sum(self.q_table['ACTION']==ACTION))
+            print(type(ACTION))
+            return np.nan
+        return index[0]
+    def get_q_value(self, state, action):
+        idx = self.get_q_value_index(state, action)
+        q_value = self.q_table.iloc[idx]['Q']
+        return q_value
     #################
     # Get sink available utilities
     #################
@@ -396,8 +412,7 @@ class Queue():
     # Get if away is full
     ################
     def is_away_full(self):
-        num_agents_in_away = np.sum(np.array([agent.position for agent in self.agents])=='away')
-        return num_agents_in_away == self.away_max_size
+        return len(self.agents) == self.away_max_size
     
     def is_away_with_space_left(self):
         return len(self.agents) < self.away_max_size
@@ -432,11 +447,9 @@ class Queue_agent():
         self.immobilization_states = ['washing', 'towel'] # States that, when waiting, do not let the agent take an action
 
         self.last_state = None
-        self.last_state_idx = None
         self.last_action = None
         self.reward = None
         self.state = None
-        self.state_idx = None
         self.action = None
         self.id = np.random.choice(1000000)
     
@@ -463,7 +476,7 @@ class Queue_agent():
     ##################
     # choose action
     ##################
-    def choose_action(self, queue, q_table, epsilon, policy):
+    def choose_action(self, queue, q_table, epsilon):
         # Choose a valid action. It should be a free sink or 'away', if it's not full
         valid_actions = []
         # Check if 'away' is not full
@@ -473,15 +486,10 @@ class Queue_agent():
         valid_actions.extend(*np.array(np.where([not int(e) for e in list(queue.sinks_availability)]), dtype=str))
         if not (self.position in valid_actions):
             valid_actions.append(self.position)
-        if policy=='random':
-            # Random Policy
-            action = np.random.choice(valid_actions)
-            self.state_idx = self.get_q_value_index(self.state, action, q_table)
-        elif policy=='e-soft':
-            # e-soft policy
-            action = self.e_soft_policy(valid_actions, queue, q_table, epsilon)
-        else:
-            print('Invalid policy')
+        # Random Policy
+        # action = np.random.choice(valid_actions)
+        # e-soft policy
+        action = self.e_soft_policy(valid_actions, queue, q_table, epsilon)
         return action
     #################
     # Get mobility status
@@ -496,25 +504,37 @@ class Queue_agent():
     ################
     def e_soft_policy(self, valid_actions, queue, q_table, epsilon):
         num_actions = len(valid_actions)
-        states_idxs = []
         q_s = []
         for valid_action in valid_actions:
             state = self.get_agent_state(queue.sinks_availability, queue.get_occupation())
-            state_idx = self.get_q_value_index(state, valid_action, q_table)
-            states_idxs.append(state_idx)
-            q_s.append(q_table.iat[state_idx, -1])
+            q_s.append(self.get_q_value(state, valid_action, q_table))
         chances = np.zeros(len(valid_actions))
         chances[:] = epsilon/num_actions
         chances[int(np.argmax(q_s))] = 1 - epsilon + epsilon/num_actions
         action = np.random.choice(valid_actions, p=chances)
-
-        self.state_idx = states_idxs[np.where(np.array(valid_actions)==action)[0][0]]
-
         action = str(action)
         return action
     def get_q_value_index(self, state, action, q_table):
-        index = q_table.loc[(q_table['POS'] == state[0]) & (q_table['NEEDS']==state[1]) & (q_table['SINKS']==state[2]) & (q_table['QUEUE']==state[3]) & (q_table['ACTION']==action)].index.item()
-        return index
+        POS = state[0]
+        NEED = state[1]
+        SINKS = state[2]
+        QUEUE = state[3]
+        ACTION = action
+        index = q_table.loc[(q_table['POS'] == POS) & (q_table['NEEDS']==NEED) & (q_table['SINKS']==SINKS) & (q_table['QUEUE']==QUEUE) & (q_table['ACTION']==ACTION)].index.values
+        if len(index)!=1:
+            print(f'Indexing error! State and action not found on Q table. State:{state}, Action:{action}')
+            print(np.sum(q_table['POS'] == POS))
+            print(np.sum(q_table['NEEDS']==NEED))
+            print(np.sum(q_table['SINKS']==SINKS))
+            print(np.sum(q_table['QUEUE']==QUEUE))
+            print(np.sum(q_table['ACTION']==ACTION))
+            print(type(ACTION))
+            return np.nan
+        return index[0]
+    def get_q_value(self, state, action, q_table):
+        idx = self.get_q_value_index(state, action, q_table)
+        q_value = q_table.iloc[idx]['Q']
+        return q_value
     ###################
     # Get state
     ###################
