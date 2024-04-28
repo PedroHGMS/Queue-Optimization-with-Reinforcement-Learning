@@ -181,14 +181,16 @@ class Queue():
             # Egocentric - Different rewards for each of the agents, based on how much time they spent there
             egocentric_total_reward = self.set_agents_egocentric_reward(ids_agents_ready_for_action)
             total_reward = egocentric_total_reward
+
+            # Handle finished agents
+            finished_agents = self.handle_finished_agents(removed_agents)
+            # Add finished agents for optimization step
+            for agent in finished_agents:
+                agents_for_optimization.append(deepcopy(agent))
+            total_reward += len(agents_for_optimization)*self.egocentric_terminal_reward
         else:
             print('Wrong mode. Choose between collectivism and egocentric')
-
-        # Handle finished agents
-        finished_agents = self.handle_finished_agents(removed_agents)
-        # Add finished agents for optimization step
-        for agent in finished_agents:
-            agents_for_optimization.append(deepcopy(agent))
+        
         # SARSA
         # Need to run a optmization step on all agents in agents_for_optimization, with its (S,A,R,S,A) already right
         if optimize:
@@ -287,7 +289,7 @@ class Queue():
         return count
     
     def att_collectivism_reward(self, removed_agents):
-        self.collectivism_reward_accumulator = self.collectivism_reward_accumulator*(1-self.collectivism_param_decay) + self.collectivism_param_mult*removed_agents*self.collectivism_param_decay
+        self.collectivism_reward_accumulator = self.collectivism_reward_accumulator*(1-self.collectivism_param_decay) + self.collectivism_param_mult*(removed_agents-1)*self.collectivism_param_decay
         return
     
     def att_agents_last_state(self, ids):
