@@ -3,6 +3,8 @@ import numpy as np
 from functools import partial
 import pandas as pd
 from copy import deepcopy
+import plotly.express as px
+import plotly.graph_objects as go
 
 class Queue():
     ##################
@@ -15,7 +17,6 @@ class Queue():
                   collectivism_param_decay = 0.05, collectivism_param_mult = 20, 
                   egocentric_penalty = -1, egocentric_terminal_reward = 20,
                   sarsa_alpha=0.1, sarsa_gamma=0.1,
-                  policy='',
                   policy_epsilon = 0.5, # The lower, the greeder
                   q_table = None):
         # Inputs:
@@ -57,7 +58,6 @@ class Queue():
         self.sarsa_alpha = sarsa_alpha
         self.sarsa_gamma = sarsa_gamma
         self.policy_epsilon = policy_epsilon
-        self.policy = policy
         # Create or load q_table
         if q_table==None:
             self.q_table = self.get_new_q_table()
@@ -133,7 +133,7 @@ class Queue():
     #################
     # Simulation
     #################
-    def one_iteration(self, optimize):
+    def one_iteration(self, optimize, policy):
         # At the start: (S1,A1,R1,S2,)
         # Get elegible agents
         ids_agents_ready_for_action = self.get_agents_ready_for_action()
@@ -145,7 +145,7 @@ class Queue():
             # Att state in case the last agent have moved. If not, this line should do nothing
             self.att_agents_state([id])
 
-            action = self.agents[id].choose_action(self,self.q_table,self.policy_epsilon,self.policy)
+            action = self.agents[id].choose_action(self,self.q_table,self.policy_epsilon, policy)
             # print('action:',action)
             # (S1,A1,R1,S2,) -> (S1,A1,R1,S2,A2)
             self.take_action(action, id)
@@ -289,7 +289,7 @@ class Queue():
         return count
     
     def att_collectivism_reward(self, removed_agents):
-        self.collectivism_reward_accumulator = self.collectivism_reward_accumulator*(1-self.collectivism_param_decay) + self.collectivism_param_mult*(removed_agents-1)*self.collectivism_param_decay
+        self.collectivism_reward_accumulator = self.collectivism_reward_accumulator*(1-self.collectivism_param_decay) + self.collectivism_param_mult*(removed_agents)*self.collectivism_param_decay
         return
     
     def att_agents_last_state(self, ids):
@@ -481,7 +481,9 @@ class Queue_agent():
             self.state_idx = self.get_q_value_index(self.state, action, q_table)
         elif policy=='e-soft':
             # e-soft policy
-            action = self.e_soft_policy(valid_actions, queue, q_table, epsilon)
+            action = self.e_soft_policy(valid_actions, queue, q_table, epsilon=epsilon)
+        elif policy=='greedy':
+            action = self.e_soft_policy(valid_actions, queue, q_table, epsilon=0)
         else:
             print('Invalid policy')
         return action
@@ -530,6 +532,10 @@ class Queue_agent():
 
 
 
+###################################################################
+# Other functions
+###################################################################
+
 def get_binaries_array(n):
     # Return all the combinations of bits up to n bits
     A = '0'*n
@@ -537,3 +543,48 @@ def get_binaries_array(n):
     for i in range(2**n):
         R.append("{0:b}".format(i).zfill(n))
     return R
+
+def plot_agents_and_rewards(window_size, agents_and_rewards_dict, mean_of_all, title=''):
+    fig = go.Figure()
+
+    num_agents = agents_and_rewards_dict['num_agents']
+    rewards = agents_and_rewards_dict['rewards']
+
+    # Add traces
+    # Agents
+    num_agents_np = np.array(num_agents)
+    cumsum_vec = np.cumsum(np.insert(num_agents_np, 0, 0)) 
+    num_agents_avg = (cumsum_vec[window_size:] - cumsum_vec[:-window_size]) / window_size
+
+    # fig.add_trace(go.Scatter(x=np.arange(len(num_agents)), y=np.array(num_agents),
+    #                     mode='lines',
+    #                     name='Num agents'))
+
+    fig.add_trace(go.Scatter(x=np.arange(window_size,window_size+len(num_agents_avg)), y=num_agents_avg,
+                        mode='lines',
+                        name='Num agents avg'))
+
+    # Rewards
+    rewards_np = np.array(rewards)
+    cumsum_vec = np.cumsum(np.insert(rewards_np, 0, 0)) 
+    rewards_avg = (cumsum_vec[window_size:] - cumsum_vec[:-window_size]) / window_size
+
+    # fig.add_trace(go.Scatter(x=np.arange(len(rewards)), y=np.array(rewards),
+    #                     mode='lines',
+    #                     name='Rewards'))
+
+    fig.add_trace(go.Scatter(x=np.arange(window_size,window_size+len(rewards_avg)), y=rewards_avg,
+                        mode='lines',
+                        name='Rewards avg'))
+
+    if mean_of_all:
+        fig.update_layout({
+            'title': f'{title}<br> Average:  Reward: {np.mean(rewards_np):.2f} | Num agents: {np.mean(num_agents_np):.2f}',
+        })
+    else:
+        fig.update_layout({
+            'title': f'{title}<br> Average in last 1k steps:  Reward: {np.mean(rewards_np[-1000:]):.2f} | Num agents: {np.mean(num_agents_np[-1000:]):.2f}',
+        })
+
+    fig.show()
+    print(f'Correlation between number of agents and reward: {np.corrcoef(rewards_np, num_agents_np)[1,0]:.2f}')
